@@ -2,9 +2,11 @@ export type ConnectionStatus = 'not_connected' | 'connecting' | 'connected' | 'v
 
 export type AchievementStatus = 'locked' | 'available' | 'claiming' | 'claimed'
 
+export type AIPlatform = 'cursor' | 'claude_console' | 'chatgpt' | 'claude'
+
 export interface PlatformConnection {
   id: string
-  platform: 'github' | 'linkedin' | 'twitter'
+  platform: AIPlatform
   status: ConnectionStatus
   username?: string
   profileUrl?: string
@@ -13,6 +15,8 @@ export interface PlatformConnection {
   verifiedDataPoints?: string[]
   lastVerified?: string
   connectedAt?: string
+  /** Primus zkTLS template ID for this platform */
+  primusTemplateId?: string
 }
 
 export interface TrustScoreFactor {
@@ -51,7 +55,7 @@ export interface Achievement {
   progress: number
   maxProgress: number
   requirement: string
-  source: 'github' | 'linkedin' | 'twitter' | 'multi'
+  source: AIPlatform | 'multi'
   unlockedAt?: string
   claimedAt?: string
 }
@@ -62,7 +66,7 @@ export interface ActivityEvent {
   title: string
   description: string
   timestamp: string
-  platform?: 'github' | 'linkedin' | 'twitter'
+  platform?: AIPlatform
 }
 
 export interface ReputationData {

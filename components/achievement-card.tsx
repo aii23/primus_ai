@@ -3,21 +3,14 @@
 import { useState } from 'react'
 import {
   Star,
-  Flame,
-  Users,
-  BadgeCheck,
-  Briefcase,
-  Network,
-  GitPullRequest,
-  Megaphone,
-  PenTool,
+  MousePointer2,
+  Terminal,
+  MessageCircle,
+  Sparkles,
   ShieldCheck,
   CheckCircle2,
   Lock,
   Loader2,
-  Github,
-  Linkedin,
-  Twitter,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -28,30 +21,35 @@ import { Progress } from '@/components/ui/progress'
 import type { Achievement, AchievementStatus } from '@/lib/types'
 
 const iconMap: Record<string, typeof Star> = {
-  star: Star,
-  flame: Flame,
-  users: Users,
-  'badge-check': BadgeCheck,
-  briefcase: Briefcase,
-  network: Network,
-  'git-pull-request': GitPullRequest,
-  megaphone: Megaphone,
-  'pen-tool': PenTool,
-  'shield-check': ShieldCheck,
+  'mouse-pointer-2': MousePointer2,
+  terminal:         Terminal,
+  'message-circle': MessageCircle,
+  sparkles:         Sparkles,
+  'shield-check':   ShieldCheck,
+  star:             Star,
 }
 
 const sourceIcons = {
-  github: Github,
-  linkedin: Linkedin,
-  twitter: Twitter,
-  multi: ShieldCheck,
+  cursor:        MousePointer2,
+  claude_console: Terminal,
+  chatgpt:       MessageCircle,
+  claude:        Sparkles,
+  multi:         ShieldCheck,
+}
+
+const sourceLabels: Record<string, string> = {
+  cursor:        'Cursor',
+  claude_console: 'Claude Console',
+  chatgpt:       'ChatGPT',
+  claude:        'Claude',
+  multi:         'Multi-platform',
 }
 
 const statusConfig: Record<AchievementStatus, { label: string; variant: 'default' | 'secondary' | 'outline' }> = {
-  locked: { label: 'Locked', variant: 'outline' },
-  available: { label: 'Available', variant: 'secondary' },
-  claiming: { label: 'Claiming...', variant: 'secondary' },
-  claimed: { label: 'Claimed', variant: 'default' },
+  locked:   { label: 'Locked',       variant: 'outline' },
+  available: { label: 'Available',   variant: 'secondary' },
+  claiming:  { label: 'Claiming...', variant: 'secondary' },
+  claimed:   { label: 'Claimed',     variant: 'default' },
 }
 
 interface AchievementCardProps {
@@ -61,7 +59,7 @@ interface AchievementCardProps {
 export function AchievementCard({ achievement }: AchievementCardProps) {
   const [status, setStatus] = useState<AchievementStatus>(achievement.status)
 
-  const Icon = iconMap[achievement.icon] || Star
+  const Icon = iconMap[achievement.icon] ?? Star
   const SourceIcon = sourceIcons[achievement.source]
   const statusInfo = statusConfig[status]
   const progress = Math.min((achievement.progress / achievement.maxProgress) * 100, 100)
@@ -69,7 +67,7 @@ export function AchievementCard({ achievement }: AchievementCardProps) {
 
   const handleClaim = async () => {
     setStatus('claiming')
-    await new Promise(resolve => setTimeout(resolve, 1500))
+    await new Promise((resolve) => setTimeout(resolve, 1500))
     setStatus('claimed')
     toast.success(`Achievement "${achievement.title}" claimed!`)
   }
@@ -79,12 +77,12 @@ export function AchievementCard({ achievement }: AchievementCardProps) {
       {status === 'claimed' && (
         <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent pointer-events-none" />
       )}
-      
+
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-2">
           <div className={`flex size-12 items-center justify-center rounded-xl ${
-            status === 'claimed' 
-              ? 'bg-primary text-primary-foreground' 
+            status === 'claimed'
+              ? 'bg-primary text-primary-foreground'
               : status === 'locked'
               ? 'bg-muted text-muted-foreground'
               : 'bg-primary/10 text-primary'
@@ -92,9 +90,9 @@ export function AchievementCard({ achievement }: AchievementCardProps) {
             {status === 'locked' ? <Lock className="size-5" /> : <Icon className="size-5" />}
           </div>
           <Badge variant={statusInfo.variant} className="shrink-0">
-            {status === 'claimed' && <CheckCircle2 className="mr-1 size-3" />}
+            {status === 'claimed'  && <CheckCircle2 className="mr-1 size-3" />}
             {status === 'claiming' && <Loader2 className="mr-1 size-3 animate-spin" />}
-            {status === 'locked' && <Lock className="mr-1 size-3" />}
+            {status === 'locked'   && <Lock className="mr-1 size-3" />}
             {statusInfo.label}
           </Badge>
         </div>
@@ -105,7 +103,6 @@ export function AchievementCard({ achievement }: AchievementCardProps) {
       </CardHeader>
 
       <CardContent className="space-y-4">
-        {/* Progress section */}
         <div className="space-y-2">
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted-foreground">Progress</span>
@@ -116,16 +113,12 @@ export function AchievementCard({ achievement }: AchievementCardProps) {
           <Progress value={progress} className="h-2" />
         </div>
 
-        {/* Requirement */}
-        <p className="text-xs text-muted-foreground">
-          {achievement.requirement}
-        </p>
+        <p className="text-xs text-muted-foreground">{achievement.requirement}</p>
 
-        {/* Source badge & action */}
         <div className="flex items-center justify-between pt-2">
           <Badge variant="outline" className="gap-1.5 text-xs">
             <SourceIcon className="size-3" />
-            {achievement.source === 'multi' ? 'Multi-platform' : achievement.source.charAt(0).toUpperCase() + achievement.source.slice(1)}
+            {sourceLabels[achievement.source] ?? achievement.source}
           </Badge>
 
           {status === 'available' && isComplete && (
@@ -134,9 +127,7 @@ export function AchievementCard({ achievement }: AchievementCardProps) {
             </Button>
           )}
           {status === 'available' && !isComplete && (
-            <span className="text-xs text-muted-foreground">
-              {Math.round(progress)}% complete
-            </span>
+            <span className="text-xs text-muted-foreground">{Math.round(progress)}% complete</span>
           )}
           {status === 'claimed' && achievement.claimedAt && (
             <span className="text-xs text-muted-foreground">
@@ -147,9 +138,7 @@ export function AchievementCard({ achievement }: AchievementCardProps) {
             </span>
           )}
           {status === 'locked' && (
-            <span className="text-xs text-muted-foreground">
-              Connect platform to unlock
-            </span>
+            <span className="text-xs text-muted-foreground">Verify tool to unlock</span>
           )}
         </div>
       </CardContent>

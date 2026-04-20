@@ -3,9 +3,10 @@ import {
   ShieldCheck,
   Trophy,
   TrendingUp,
-  Github,
-  Linkedin,
-  Twitter,
+  MousePointer2,
+  Terminal,
+  MessageCircle,
+  Sparkles,
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import type { ActivityEvent } from '@/lib/types'
@@ -15,16 +16,17 @@ interface ActivityFeedProps {
 }
 
 const typeIcons = {
-  connection: Link2,
+  connection:   Link2,
   verification: ShieldCheck,
-  achievement: Trophy,
+  achievement:  Trophy,
   score_update: TrendingUp,
 }
 
 const platformIcons = {
-  github: Github,
-  linkedin: Linkedin,
-  twitter: Twitter,
+  cursor:        MousePointer2,
+  claude_console: Terminal,
+  chatgpt:       MessageCircle,
+  claude:        Sparkles,
 }
 
 export function ActivityFeed({ events }: ActivityFeedProps) {
