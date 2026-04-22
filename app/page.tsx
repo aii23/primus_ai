@@ -1,39 +1,137 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { Shield, Github, Linkedin, CheckCircle2, Loader2 } from 'lucide-react'
+import { useState } from "react";
+import { signIn } from "next-auth/react";
+import { useRouter } from "next/navigation";
+import {
+  Shield,
+  Github,
+  Linkedin,
+  CheckCircle2,
+  Loader2,
+  Wallet,
+  AlertCircle,
+  ChevronRight,
+} from "lucide-react";
+import { SiweMessage } from "siwe";
+import { useAccount, useConnect, useDisconnect } from "wagmi";
 
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 
 const features = [
-  'Aggregate your identity across platforms',
-  'Build verifiable reputation proofs',
-  'Unlock achievements based on real activity',
-  'Share trusted credentials anywhere',
-]
+  "Aggregate your identity across platforms",
+  "Build verifiable reputation proofs",
+  "Unlock achievements based on real activity",
+  "Share trusted credentials anywhere",
+];
+
+type SignInStep = "idle" | "signing" | "verifying" | "error";
+
+function truncateAddress(address: string) {
+  return `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
 
 export default function LoginPage() {
-  const router = useRouter()
-  const [isLoading, setIsLoading] = useState(false)
+  const { address, isConnected } = useAccount();
+  const { connectors, connect, isPending: isConnecting } = useConnect();
+  const { disconnect } = useDisconnect();
+  const router = useRouter();
+  const [step, setStep] = useState<SignInStep>("idle");
+  const [error, setError] = useState<string | null>(null);
 
-  const handleGoogleSignIn = async () => {
-    setIsLoading(true)
-    // Simulate auth delay
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    router.push('/dashboard')
+  const siweLabel: Record<SignInStep, string> = {
+    idle: "Sign in with Ethereum",
+    signing: "Sign the message in your wallet…",
+    verifying: "Verifying signature…",
+    error: "Try again",
+  };
+
+  async function handleSiweSignIn() {
+    if (!address) return;
+    setError(null);
+    setStep("signing");
+
+    try {
+      const ethereum = (window as any).ethereum;
+      if (!ethereum) {
+        setError("No Ethereum wallet found. Please install MetaMask.");
+        setStep("error");
+        return;
+      }
+
+      const chainIdHex: string = await ethereum.request({
+        method: "eth_chainId",
+      });
+      const chainId = parseInt(chainIdHex, 16);
+
+      const nonceRes = await fetch(`/api/nonce?address=${address}`);
+      if (!nonceRes.ok) throw new Error("Failed to fetch nonce");
+      const { nonce } = await nonceRes.json();
+
+      const message = new SiweMessage({
+        domain: window.location.host,
+        address,
+        statement: "Sign in to TrustGraph to verify your developer identity.",
+        uri: window.location.origin,
+        version: "1",
+        chainId,
+        nonce,
+      });
+      const messageString = message.prepareMessage();
+
+      const signature: string = await ethereum.request({
+        method: "personal_sign",
+        params: [messageString, address],
+      });
+
+      setStep("verifying");
+      const result = await signIn("credentials", {
+        message: messageString,
+        signature,
+        redirect: false,
+      });
+
+      if (result?.error) {
+        setError("Signature verification failed. Please try again.");
+        setStep("error");
+        return;
+      }
+
+      router.push("/dashboard");
+    } catch (err: any) {
+      if (err?.code === 4001) {
+        setError("Signature request cancelled.");
+      } else {
+        setError(err?.message ?? "Unexpected error. Please try again.");
+      }
+      setStep("error");
+    }
   }
+
+  const isSiweLoading = step === "signing" || step === "verifying";
+
+  // Prefer MetaMask connector; fall back to the first available one
+  const primaryConnector =
+    connectors.find((c) => c.name === "MetaMask") ?? connectors[0];
 
   return (
     <div className="min-h-screen flex">
-      {/* Left panel - branding */}
+      {/* Left panel – branding */}
       <div className="hidden lg:flex lg:w-1/2 flex-col justify-between bg-gradient-to-br from-primary/10 via-background to-background p-12">
         <div className="flex items-center gap-3">
           <div className="flex size-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <Shield className="size-5" />
           </div>
-          <span className="text-xl font-semibold tracking-tight">TrustGraph</span>
+          <span className="text-xl font-semibold tracking-tight">
+            TrustGraph
+          </span>
         </div>
 
         <div className="space-y-8">
@@ -42,7 +140,8 @@ export default function LoginPage() {
               Build your verifiable developer reputation
             </h1>
             <p className="mt-4 text-lg text-muted-foreground text-pretty">
-              Connect your platforms, aggregate your achievements, and create cryptographic proofs of your professional identity.
+              Connect your platforms, aggregate your achievements, and create
+              cryptographic proofs of your professional identity.
             </p>
           </div>
 
@@ -74,7 +173,7 @@ export default function LoginPage() {
         </div>
       </div>
 
-      {/* Right panel - auth */}
+      {/* Right panel – auth */}
       <div className="flex flex-1 items-center justify-center p-6">
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
@@ -83,40 +182,105 @@ export default function LoginPage() {
             </div>
             <CardTitle className="text-2xl">Welcome to TrustGraph</CardTitle>
             <CardDescription>
-              Sign in to start building your verifiable reputation
+              {isConnected
+                ? "Wallet connected. Sign the message to verify ownership."
+                : "Connect your Ethereum wallet to start building your verifiable reputation."}
             </CardDescription>
           </CardHeader>
+
           <CardContent className="space-y-4">
-            <Button
-              className="w-full"
-              size="lg"
-              onClick={handleGoogleSignIn}
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <Loader2 className="mr-2 size-4 animate-spin" />
-              ) : (
-                <svg className="mr-2 size-4" viewBox="0 0 24 24">
-                  <path
-                    fill="currentColor"
-                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                  />
-                  <path
-                    fill="currentColor"
-                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                  />
-                  <path
-                    fill="currentColor"
-                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-                  />
-                  <path
-                    fill="currentColor"
-                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                  />
-                </svg>
-              )}
-              Continue with Google
-            </Button>
+            {/* Error message */}
+            {error && (
+              <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                <AlertCircle className="size-4 mt-0.5 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            {!isConnected ? (
+              /* ── Step 1: Connect wallet ── */
+              <div className="space-y-3">
+                <Button
+                  className="w-full"
+                  size="lg"
+                  onClick={() => connect({ connector: primaryConnector })}
+                  disabled={isConnecting}
+                >
+                  {isConnecting ? (
+                    <Loader2 className="mr-2 size-4 animate-spin" />
+                  ) : (
+                    <Wallet className="mr-2 size-4" />
+                  )}
+                  {isConnecting ? "Connecting…" : "Connect Wallet"}
+                </Button>
+
+                {/* Show remaining connectors if there are multiple */}
+                {connectors.length > 1 &&
+                  connectors
+                    .filter((c) => c.id !== primaryConnector?.id)
+                    .map((connector) => (
+                      <Button
+                        key={connector.id}
+                        variant="outline"
+                        className="w-full"
+                        size="lg"
+                        onClick={() => connect({ connector })}
+                        disabled={isConnecting}
+                      >
+                        {connector.name}
+                      </Button>
+                    ))}
+              </div>
+            ) : (
+              /* ── Step 2: SIWE sign-in ── */
+              <div className="space-y-3">
+                {/* Connected address pill */}
+                <div className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Wallet className="size-4 shrink-0" />
+                    <span className="font-mono">{truncateAddress(address!)}</span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      disconnect();
+                      setStep("idle");
+                      setError(null);
+                    }}
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Disconnect
+                  </button>
+                </div>
+
+                <Button
+                  className="w-full"
+                  size="lg"
+                  onClick={handleSiweSignIn}
+                  disabled={isSiweLoading}
+                >
+                  {isSiweLoading ? (
+                    <Loader2 className="mr-2 size-4 animate-spin" />
+                  ) : (
+                    <ChevronRight className="mr-2 size-4" />
+                  )}
+                  {siweLabel[step]}
+                </Button>
+
+                {/* Step indicator */}
+                {isSiweLoading && (
+                  <ol className="flex justify-center gap-6 text-xs text-muted-foreground">
+                    {(["signing", "verifying"] as const).map((s) => (
+                      <li
+                        key={s}
+                        className={`capitalize transition-colors ${step === s ? "text-primary font-medium" : ""}`}
+                      >
+                        {s}
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+            )}
 
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
@@ -124,18 +288,18 @@ export default function LoginPage() {
               </div>
               <div className="relative flex justify-center text-xs uppercase">
                 <span className="bg-card px-2 text-muted-foreground">
-                  Secure & Private
+                  EIP-4361 · Secure & Private
                 </span>
               </div>
             </div>
 
             <p className="text-center text-xs text-muted-foreground">
-              By continuing, you agree to our Terms of Service and Privacy Policy. 
-              Your data is encrypted and never shared without consent.
+              No password required. Signing a message proves wallet ownership
+              without any on-chain transaction or gas fee.
             </p>
           </CardContent>
         </Card>
       </div>
     </div>
-  )
+  );
 }
