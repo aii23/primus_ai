@@ -34,23 +34,31 @@ export function PlatformStatus({ connections }: PlatformStatusProps) {
         const StatusIcon = status.icon
 
         return (
-          <Link key={connection.id} href="/connections">
-            <Card className="transition-colors hover:bg-muted/50 cursor-pointer">
-              <CardContent className="flex items-center justify-between p-4">
-                <div className="flex items-center gap-3">
-                  <div className={`flex size-9 items-center justify-center rounded-lg bg-muted ${platform.color}`}>
+          <Link key={connection.id} href="/connections" className="min-w-0">
+            <Card className="min-w-0 overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer">
+              <CardContent className="flex min-w-0 items-center gap-2 p-4">
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+                  <div
+                    className={`flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted ${platform.color}`}
+                  >
                     <Icon className="size-4" />
                   </div>
-                  <div>
-                    <p className="font-medium text-sm">{platform.name}</p>
-                    <p className="text-xs text-muted-foreground">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium text-sm">{platform.name}</p>
+                    <p className="truncate text-xs text-muted-foreground">
                       {connection.username ? `@${connection.username}` : 'Not connected'}
                     </p>
                   </div>
                 </div>
-                <Badge variant="outline" className={`gap-1 ${status.color}`}>
-                  <StatusIcon className="size-3" />
-                  <span className="hidden sm:inline">{status.label}</span>
+                <Badge
+                  variant="outline"
+                  title={status.label}
+                  className={`min-w-0 max-w-[45%] gap-1 overflow-hidden ${status.color}`}
+                >
+                  <StatusIcon className="size-3 shrink-0" />
+                  <span className="hidden min-w-0 truncate text-left sm:inline-block sm:max-w-[5.5rem] md:max-w-[7rem]">
+                    {status.label}
+                  </span>
                 </Badge>
               </CardContent>
             </Card>

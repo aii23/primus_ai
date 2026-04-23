@@ -54,22 +54,38 @@ const statusConfig: Record<AchievementStatus, { label: string; variant: 'default
 
 interface AchievementCardProps {
   achievement: Achievement
+  /** When provided, called on Claim button click; replaces the mock flow. */
+  onClaim?: (id: string) => Promise<void>
 }
 
-export function AchievementCard({ achievement }: AchievementCardProps) {
+export function AchievementCard({ achievement, onClaim }: AchievementCardProps) {
   const [status, setStatus] = useState<AchievementStatus>(achievement.status)
 
   const Icon = iconMap[achievement.icon] ?? Star
-  const SourceIcon = sourceIcons[achievement.source]
+  const SourceIcon = sourceIcons[achievement.source as keyof typeof sourceIcons] ?? ShieldCheck
   const statusInfo = statusConfig[status]
   const progress = Math.min((achievement.progress / achievement.maxProgress) * 100, 100)
   const isComplete = progress >= 100
 
+  // Sync external status changes (e.g. after cache invalidation)
+  if (achievement.status !== status && status !== 'claiming') {
+    setStatus(achievement.status)
+  }
+
   const handleClaim = async () => {
     setStatus('claiming')
-    await new Promise((resolve) => setTimeout(resolve, 1500))
-    setStatus('claimed')
-    toast.success(`Achievement "${achievement.title}" claimed!`)
+    try {
+      if (onClaim) {
+        await onClaim(achievement.id)
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 1500))
+      }
+      setStatus('claimed')
+      toast.success(`Achievement "${achievement.title}" claimed!`)
+    } catch {
+      setStatus('available')
+      toast.error('Failed to claim achievement. Please try again.')
+    }
   }
 
   return (

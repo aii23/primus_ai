@@ -90,10 +90,8 @@ model UserAchievement {
 
 // ─── Platform Connections ─────────────────────────────────────────────────────
 // One row per (user, platform) pair. Stores zkTLS attestation data when verified.
-// Platform-specific verified fields:
-//   cursor         → membershipType  (e.g. "Free" | "Pro" | "Business" | "Enterprise")
-//   claude_console → tokenAmount     (total tokens spent so far)
-//   chatgpt        → planType        (e.g. "Free" | "Plus" | "Team" | "Enterprise")
+// Platform-specific verified fields live in `verifiedSummary` (JSON) — typed in app
+// code (see lib/platform-verified-summary.ts); add keys there when adding platforms.
 
 model PlatformConnection {
   id          String @id @default(cuid())
@@ -105,10 +103,8 @@ model PlatformConnection {
 
   username String?
 
-  // Platform-specific verified data points
-  membershipType String? // cursor
-  tokenAmount    Int?    // claude_console — total tokens spent; migrate to BigInt if needed
-  planType       String? // chatgpt
+  /** Parsed attestation highlights: membershipType, tokenAmount, planType, … */
+  verifiedSummary Json?
 
   primusTemplateId String?
   attestationData  Json?   // raw Primus zkTLS attestation payload

@@ -27,8 +27,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import type { PlatformConnection, ConnectionStatus } from '@/lib/types'
-import { attestPlatform, type AttestationResult } from '@/lib/primus-attestation'
+import type { PlatformConnection, ConnectionStatus, AIPlatform } from '@/lib/types'
+import {
+  buildVerifiedSummaryFromExtracted,
+  parseVerifiedSummary,
+} from '@/lib/platform-verified-summary'
+import {
+  completePrimusAttestationFromSignedRequest,
+  type AttestationResult,
+} from '@/lib/primus-attestation'
+import { trpc } from '@/lib/trpc/react'
 
 const platformConfig = {
   cursor: {
@@ -53,7 +61,7 @@ const platformConfig = {
     name: 'Claude',
     icon: Sparkles,
     color: 'text-amber-500',
-    description: 'Verify your Claude.ai account to prove usage of Anthropic\'s consumer AI.',
+    description: "Verify your Claude.ai account to prove usage of Anthropic's consumer AI.",
   },
 }
 
@@ -69,6 +77,113 @@ const statusConfig: Record<
   failed: { label: 'Failed', variant: 'destructive' },
 }
 
+// ─── Attestation data extraction ─────────────────────────────────────────────
+
+interface ExtractedPlatformData {
+  membershipType?: string
+  tokenAmount?: number
+  planType?: string
+  username?: string
+}
+
+function extractPlatformFields(
+  platform: AIPlatform,
+  data: Record<string, unknown>,
+): ExtractedPlatformData {
+  const result: ExtractedPlatformData = {}
+
+  // Best-effort username extraction from common keys
+  for (const key of ['email', 'username', 'user_email', 'account_email', 'name']) {
+    if (typeof data[key] === 'string' && data[key]) {
+      result.username = data[key] as string
+      break
+    }
+  }
+
+  switch (platform) {
+    case 'cursor':
+      for (const key of ['membershipType', 'plan', 'subscription', 'tier']) {
+        if (typeof data[key] === 'string') {
+          result.membershipType = data[key] as string
+          break
+        }
+      }
+      break
+
+    case 'claude_console':
+      for (const key of ['tokenAmount', 'tokens', 'token_count', 'total_tokens']) {
+        if (typeof data[key] === 'number') {
+          result.tokenAmount = data[key] as number
+          break
+        }
+        if (typeof data[key] === 'string') {
+          const n = parseInt(data[key] as string, 10)
+          if (!isNaN(n)) {
+            result.tokenAmount = n
+            break
+          }
+        }
+      }
+      break
+
+    case 'chatgpt':
+      for (const key of ['planType', 'plan', 'subscription', 'tier']) {
+        if (typeof data[key] === 'string') {
+          result.planType = data[key] as string
+          break
+        }
+      }
+      break
+
+    case 'claude':
+      // No platform-specific numeric/enum field; username already handled above
+      break
+  }
+
+  return result
+}
+
+// ─── Proof hash extraction ────────────────────────────────────────────────────
+
+function extractProofHash(raw: unknown): string | null {
+  if (!raw) return null
+  const obj = (typeof raw === 'string' ? (() => {
+    try { return JSON.parse(raw) } catch { return null }
+  })() : raw) as Record<string, unknown> | null
+  if (!obj) return typeof raw === 'string' ? raw.slice(0, 66) : null
+  if (typeof obj.proof === 'string') return obj.proof
+  if (typeof obj.hash === 'string') return obj.hash
+  return null
+}
+
+// ─── Derived verified data points ────────────────────────────────────────────
+
+function buildVerifiedDataPoints(
+  platform: AIPlatform,
+  membershipType: string | undefined,
+  tokenAmount: number | undefined,
+  planType: string | undefined,
+): string[] {
+  const points: string[] = []
+  switch (platform) {
+    case 'cursor':
+      if (membershipType) points.push(`Membership: ${membershipType}`)
+      break
+    case 'claude_console':
+      if (tokenAmount !== undefined) points.push(`Tokens used: ${tokenAmount.toLocaleString()}`)
+      break
+    case 'chatgpt':
+      if (planType) points.push(`Plan: ${planType}`)
+      break
+    case 'claude':
+      points.push('Account verified')
+      break
+  }
+  return points
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
 interface IntegrationCardProps {
   connection: PlatformConnection
 }
@@ -80,9 +195,32 @@ export function IntegrationCard({ connection }: IntegrationCardProps) {
   const [attestation, setAttestation] = useState<AttestationResult | null>(null)
   const [verifiedAt, setVerifiedAt] = useState<string | undefined>(connection.lastVerified)
 
+  const initialSummary = parseVerifiedSummary(connection.verifiedSummary)
+  const [membershipType, setMembershipType] = useState<string | undefined>(
+    initialSummary?.membershipType,
+  )
+  const [tokenAmount, setTokenAmount] = useState<number | undefined>(initialSummary?.tokenAmount)
+  const [planType, setPlanType] = useState<string | undefined>(initialSummary?.planType)
+  const [username, setUsername] = useState<string | undefined>(connection.username)
+
   const config = platformConfig[connection.platform]
   const statusInfo = statusConfig[status]
   const Icon = config.icon
+
+  const utils = trpc.useUtils()
+  const upsertMutation = trpc.connections.upsert.useMutation({
+    onSuccess: () => {
+      void utils.connections.list.invalidate();
+      void utils.stats.get.invalidate();
+    },
+  })
+  const disconnectMutation = trpc.connections.disconnect.useMutation({
+    onSuccess: () => {
+      void utils.connections.list.invalidate();
+      void utils.stats.get.invalidate();
+    },
+  })
+  const primusSignedRequestMutation = trpc.connections.primusSignedRequest.useMutation()
 
   const handleVerify = async () => {
     if (!connection.primusTemplateId) {
@@ -93,13 +231,48 @@ export function IntegrationCard({ connection }: IntegrationCardProps) {
     setIsVerifying(true)
     setStatus('verifying')
     try {
-      const result = await attestPlatform(connection.platform)
+      const signedPayload = await primusSignedRequestMutation.mutateAsync({
+        platform: connection.platform,
+      })
+      const result = await completePrimusAttestationFromSignedRequest({
+        signedRequestStr: signedPayload.signedRequestStr,
+        appId: signedPayload.appId,
+        primusEnv: signedPayload.primusEnv,
+      })
 
       if (result.success) {
-        const now = new Date().toISOString()
+        const now = new Date()
+
+        // Extract platform-specific fields from the attested data
+        const rawData =
+          result.data != null && typeof result.data === 'object'
+            ? (result.data as Record<string, unknown>)
+            : {}
+        const extracted = extractPlatformFields(connection.platform, rawData)
+
+        // Update local state immediately for responsive UI
         setAttestation(result)
-        setVerifiedAt(now)
+        setVerifiedAt(now.toISOString())
         setStatus('verified')
+        if (extracted.membershipType) setMembershipType(extracted.membershipType)
+        if (extracted.tokenAmount !== undefined) setTokenAmount(extracted.tokenAmount)
+        if (extracted.planType) setPlanType(extracted.planType)
+        if (extracted.username) setUsername(extracted.username)
+
+        const summaryPayload = buildVerifiedSummaryFromExtracted(extracted) ?? {}
+
+        // Persist to DB
+        upsertMutation.mutate({
+          platform: connection.platform,
+          status: 'verified',
+          username: extracted.username ?? username,
+          verifiedSummary: summaryPayload,
+          primusTemplateId: connection.primusTemplateId,
+          attestationData: result.rawAttestation,
+          lastVerified: now,
+          connectedAt: now,
+        })
+
         toast.success(`${config.name} verified via Primus zkTLS!`)
       } else {
         setStatus('failed')
@@ -119,6 +292,11 @@ export function IntegrationCard({ connection }: IntegrationCardProps) {
     setStatus('not_connected')
     setAttestation(null)
     setVerifiedAt(undefined)
+    setMembershipType(undefined)
+    setTokenAmount(undefined)
+    setPlanType(undefined)
+    setUsername(undefined)
+    disconnectMutation.mutate({ platform: connection.platform })
     toast.info(`${config.name} disconnected`)
   }
 
@@ -129,29 +307,37 @@ export function IntegrationCard({ connection }: IntegrationCardProps) {
       year: 'numeric',
     })
 
-  const proofHash: string | null = (() => {
-    if (!attestation?.rawAttestation) return null
-    const raw = attestation.rawAttestation
-    if (typeof raw === 'object' && raw !== null) {
-      const obj = raw as Record<string, unknown>
-      if (typeof obj.proof === 'string') return obj.proof
-      if (typeof obj.hash === 'string') return obj.hash
-    }
-    if (typeof raw === 'string') {
-      try {
-        const parsed = JSON.parse(raw) as Record<string, unknown>
-        if (typeof parsed.proof === 'string') return parsed.proof
-        if (typeof parsed.hash === 'string') return parsed.hash
-      } catch {
-        // fall through
-      }
-      return raw.slice(0, 66)
-    }
-    return null
-  })()
+  // Proof hash: prefer freshly attested, fall back to what's stored in DB
+  const proofHash: string | null =
+    extractProofHash(attestation?.rawAttestation) ?? extractProofHash(connection.attestationData)
 
   const attestedDataJson: string | null =
-    attestation?.data != null ? JSON.stringify(attestation.data, null, 2) : null
+    attestation?.data != null
+      ? JSON.stringify(attestation.data, null, 2)
+      : connection.attestationData != null
+        ? (() => {
+            try {
+              const raw = connection.attestationData
+              if (typeof raw === 'object') return JSON.stringify(raw, null, 2)
+              if (typeof raw === 'string') {
+                const inner = JSON.parse(raw) as Record<string, unknown>
+                if (inner?.data) return JSON.stringify(JSON.parse(inner.data as string), null, 2)
+              }
+            } catch {
+              // fall through
+            }
+            return null
+          })()
+        : null
+
+  const verifiedDataPoints = buildVerifiedDataPoints(
+    connection.platform,
+    membershipType,
+    tokenAmount,
+    planType,
+  )
+
+  const displayUsername = username ?? connection.username
 
   return (
     <Card className="relative overflow-hidden">
@@ -166,7 +352,11 @@ export function IntegrationCard({ connection }: IntegrationCardProps) {
             <div>
               <CardTitle className="text-lg">{config.name}</CardTitle>
               <CardDescription className="text-xs">
-                {status === 'not_connected' ? 'Not connected' : `@${connection.username}`}
+                {status === 'not_connected'
+                  ? 'Not connected'
+                  : displayUsername
+                    ? `@${displayUsername}`
+                    : config.name}
               </CardDescription>
             </div>
           </div>
@@ -202,14 +392,14 @@ export function IntegrationCard({ connection }: IntegrationCardProps) {
         ) : (
           <>
             {/* Account preview */}
-            {connection.username && (
+            {displayUsername && (
               <div className="flex items-center gap-3 rounded-lg bg-muted/50 p-3">
                 <Avatar className="size-10">
                   <AvatarImage src={connection.avatarUrl} />
-                  <AvatarFallback>{connection.username[0].toUpperCase()}</AvatarFallback>
+                  <AvatarFallback>{displayUsername[0].toUpperCase()}</AvatarFallback>
                 </Avatar>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">@{connection.username}</p>
+                  <p className="text-sm font-medium truncate">@{displayUsername}</p>
                   {connection.followerCount && (
                     <p className="text-xs text-muted-foreground">
                       {connection.followerCount.toLocaleString()} followers
@@ -228,14 +418,14 @@ export function IntegrationCard({ connection }: IntegrationCardProps) {
             )}
 
             {/* Verified data points */}
-            {status === 'verified' && connection.verifiedDataPoints && (
+            {status === 'verified' && verifiedDataPoints.length > 0 && (
               <div className="space-y-2">
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <ShieldCheck className="size-3 text-success" />
                   <span>Verified Data Points</span>
                 </div>
                 <ul className="space-y-1.5">
-                  {connection.verifiedDataPoints.map((point, i) => (
+                  {verifiedDataPoints.map((point, i) => (
                     <li key={i} className="flex items-center gap-2 text-sm">
                       <CheckCircle2 className="size-3 text-success shrink-0" />
                       <span>{point}</span>
@@ -245,8 +435,8 @@ export function IntegrationCard({ connection }: IntegrationCardProps) {
               </div>
             )}
 
-            {/* Verified status banner (no data points yet) */}
-            {status === 'verified' && !connection.verifiedDataPoints && (
+            {/* Fallback verified banner when no data points extracted */}
+            {status === 'verified' && verifiedDataPoints.length === 0 && (
               <div className="flex items-center gap-2 rounded-lg bg-success/10 p-3 text-sm text-success">
                 <CheckCircle2 className="size-4 shrink-0" />
                 <span>Subscription verified via Primus zkTLS</span>
@@ -360,10 +550,15 @@ export function IntegrationCard({ connection }: IntegrationCardProps) {
                   variant="ghost"
                   size="icon"
                   onClick={handleDisconnect}
+                  disabled={disconnectMutation.isPending}
                   className="text-muted-foreground hover:text-destructive"
                   title="Disconnect"
                 >
-                  <AlertCircle className="size-4" />
+                  {disconnectMutation.isPending ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <AlertCircle className="size-4" />
+                  )}
                   <span className="sr-only">Disconnect</span>
                 </Button>
               )}

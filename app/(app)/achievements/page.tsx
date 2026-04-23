@@ -1,30 +1,67 @@
 'use client'
 
+import { useEffect } from 'react'
 import { useState } from 'react'
-import { Trophy, CheckCircle2, Clock, Lock } from 'lucide-react'
+import { Trophy, CheckCircle2, Clock, Lock, RefreshCw } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { AchievementCard } from '@/components/achievement-card'
-import { mockAchievements } from '@/lib/mock-data'
+import { trpc } from '@/lib/trpc/react'
+import type { AchievementStatus } from '@/lib/types'
 
 type FilterType = 'all' | 'available' | 'claimed' | 'locked'
 
 export default function AchievementsPage() {
   const [filter, setFilter] = useState<FilterType>('all')
+  const utils = trpc.useUtils()
 
-  const filteredAchievements = mockAchievements.filter((achievement) => {
+  // ── Data ─────────────────────────────────────────────────────────────────
+  const { data: achievements = [], isLoading } = trpc.achievements.listMine.useQuery()
+
+  const checkMutation = trpc.achievements.checkAndUpdate.useMutation({
+    onSuccess: () => utils.achievements.listMine.invalidate(),
+    onError: () => {
+      // Silently ignore — user may not be authenticated yet
+    },
+  })
+
+  const claimMutation = trpc.achievements.claim.useMutation({
+    onSuccess: () => utils.achievements.listMine.invalidate(),
+    onError: (err) => toast.error(err.message ?? 'Failed to claim achievement.'),
+  })
+
+  // Check conditions once on mount
+  useEffect(() => {
+    checkMutation.mutate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ── Derived state ─────────────────────────────────────────────────────────
+  const filtered = achievements.filter((a) => {
     if (filter === 'all') return true
-    return achievement.status === filter
+    return a.status === filter
   })
 
   const counts = {
-    all: mockAchievements.length,
-    available: mockAchievements.filter(a => a.status === 'available').length,
-    claimed: mockAchievements.filter(a => a.status === 'claimed').length,
-    locked: mockAchievements.filter(a => a.status === 'locked').length,
+    all: achievements.length,
+    available: achievements.filter((a) => a.status === 'available').length,
+    claimed: achievements.filter((a) => a.status === 'claimed').length,
+    locked: achievements.filter((a) => a.status === 'locked').length,
   }
 
+  // ── Handlers ──────────────────────────────────────────────────────────────
+  const handleClaim = async (achievementId: string) => {
+    await claimMutation.mutateAsync({ achievementId })
+  }
+
+  const handleRefresh = () => {
+    checkMutation.mutate()
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -40,6 +77,15 @@ export default function AchievementsPage() {
             <Trophy className="size-3" />
             {counts.claimed}/{counts.all} Claimed
           </Badge>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefresh}
+            disabled={checkMutation.isPending}
+          >
+            <RefreshCw className={`size-3 mr-1.5 ${checkMutation.isPending ? 'animate-spin' : ''}`} />
+            Check conditions
+          </Button>
         </div>
       </div>
 
@@ -85,10 +131,32 @@ export default function AchievementsPage() {
         </TabsList>
 
         <TabsContent value={filter} className="mt-6">
-          {filteredAchievements.length > 0 ? (
+          {isLoading ? (
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {filteredAchievements.map((achievement) => (
-                <AchievementCard key={achievement.id} achievement={achievement} />
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="rounded-xl border bg-card h-52 animate-pulse" />
+              ))}
+            </div>
+          ) : filtered.length > 0 ? (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {filtered.map((achievement) => (
+                <AchievementCard
+                  key={achievement.id}
+                  achievement={{
+                    id: achievement.id,
+                    title: achievement.title,
+                    description: achievement.description,
+                    icon: achievement.icon,
+                    status: achievement.status as AchievementStatus,
+                    progress: achievement.progress,
+                    maxProgress: achievement.maxProgress,
+                    requirement: achievement.requirement,
+                    source: achievement.source as 'cursor' | 'claude_console' | 'chatgpt' | 'claude' | 'multi',
+                    unlockedAt: achievement.unlockedAt?.toISOString(),
+                    claimedAt: achievement.claimedAt?.toISOString(),
+                  }}
+                  onClaim={handleClaim}
+                />
               ))}
             </div>
           ) : (

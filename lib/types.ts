@@ -1,3 +1,5 @@
+import type { VerifiedSummary } from '@/lib/platform-verified-summary'
+
 export type ConnectionStatus = 'not_connected' | 'connecting' | 'connected' | 'verifying' | 'verified' | 'failed'
 
 export type AchievementStatus = 'locked' | 'available' | 'claiming' | 'claimed'
@@ -12,11 +14,19 @@ export interface PlatformConnection {
   profileUrl?: string
   avatarUrl?: string
   followerCount?: number
+  /** Computed from platform-specific fields; not stored directly */
   verifiedDataPoints?: string[]
   lastVerified?: string
   connectedAt?: string
   /** Primus zkTLS template ID for this platform */
   primusTemplateId?: string
+  /**
+   * Typed JSON: membershipType (cursor), tokenAmount (claude_console), planType (chatgpt), …
+   * See `lib/platform-verified-summary.ts`.
+   */
+  verifiedSummary?: VerifiedSummary
+  /** Raw Primus zkTLS attestation payload stored in DB */
+  attestationData?: unknown
 }
 
 export interface TrustScoreFactor {
