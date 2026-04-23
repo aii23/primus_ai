@@ -1,7 +1,8 @@
 import type { NextAuthOptions } from 'next-auth'
 import CredentialsProvider from 'next-auth/providers/credentials'
 import { SiweMessage } from 'siwe'
-import { nonceStore } from './nonce-store'
+import { prisma } from './prisma'
+import { deleteAuthNonce, getAuthNonce } from './auth-nonce'
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -16,7 +17,7 @@ export const authOptions: NextAuthOptions = {
 
         const siwe = new SiweMessage(credentials.message)
 
-        const storedNonce = nonceStore.get(siwe.address)
+        const storedNonce = await getAuthNonce(siwe.address)
         if (!storedNonce) return null // expired or never issued
 
         const result = await siwe.verify({
@@ -26,7 +27,7 @@ export const authOptions: NextAuthOptions = {
 
         if (!result.success) return null
 
-        nonceStore.delete(siwe.address)
+        await deleteAuthNonce(siwe.address)
 
         return {
           id: siwe.address,
@@ -40,7 +41,18 @@ export const authOptions: NextAuthOptions = {
 
   callbacks: {
     async jwt({ token, user }) {
-      if (user) token.address = user.id
+      if (user) {
+        token.address = user.id
+
+        // Ensure the user record exists in the database on first sign-in.
+        // Using upsert so re-logins are safe and connections can always
+        // reference a valid User row via the foreign key.
+        await prisma.user.upsert({
+          where: { address: user.id },
+          update: {},
+          create: { address: user.id },
+        })
+      }
       return token
     },
     async session({ session, token }) {

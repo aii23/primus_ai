@@ -1,0 +1,123 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// SIWE nonces (serverless-safe; replaces in-memory store per deploy instance).
+
+model AuthNonce {
+  address   String   @id // lowercased 0x…40 hex
+  nonce     String
+  expiresAt DateTime
+}
+
+// ─── User ────────────────────────────────────────────────────────────────────
+// Primary identity is the Ethereum wallet address (lowercased).
+
+model User {
+  address   String   @id // Ethereum address, e.g. "0xabc…"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  reputationScore ReputationScore?
+  achievements    UserAchievement[]
+  connections     PlatformConnection[]
+}
+
+// ─── Reputation ───────────────────────────────────────────────────────────────
+// Computed reputation score and per-factor breakdown (one row per user).
+// `factors` is a JSONB array of { name, score, maxScore, description }.
+
+model ReputationScore {
+  id          String @id @default(cuid())
+  userAddress String @unique
+  user        User   @relation(fields: [userAddress], references: [address], onDelete: Cascade)
+
+  overallScore      Int      @default(0)
+  profileCompletion Int      @default(0)
+  factors           Json     @default("[]") // TrustScoreFactor[]
+  lastUpdated       DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+}
+
+// ─── Achievement Definitions ──────────────────────────────────────────────────
+// Global catalogue of achievements (seeded once, shared across all users).
+
+model AchievementDefinition {
+  id          String @id // stable slug, e.g. "ach_cursor_power_user"
+  title       String
+  description String
+  icon        String // lucide icon name
+  maxProgress Int    @default(1)
+  requirement String
+  source      String // "cursor" | "claude_console" | "chatgpt" | "claude" | "multi"
+
+  // Structured condition evaluated server-side against the user's PlatformConnections.
+  // Shape: AchievementCondition (see lib/achievement-conditions.ts)
+  condition   Json   @default("{}")
+
+  createdAt DateTime @default(now())
+
+  userAchievements UserAchievement[]
+}
+
+// ─── User Achievements ────────────────────────────────────────────────────────
+// Per-user progress and claim status for each achievement.
+
+model UserAchievement {
+  id          String @id @default(cuid())
+  userAddress String
+  user        User   @relation(fields: [userAddress], references: [address], onDelete: Cascade)
+
+  achievementId String
+  achievement   AchievementDefinition @relation(fields: [achievementId], references: [id])
+
+  status     String    @default("locked") // "locked" | "available" | "claiming" | "claimed"
+  progress   Int       @default(0)
+  unlockedAt DateTime?
+  claimedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userAddress, achievementId])
+}
+
+// ─── Platform Connections ─────────────────────────────────────────────────────
+// One row per (user, platform) pair. Stores zkTLS attestation data when verified.
+// Platform-specific verified fields:
+//   cursor         → membershipType  (e.g. "Free" | "Pro" | "Business" | "Enterprise")
+//   claude_console → tokenAmount     (total tokens spent so far)
+//   chatgpt        → planType        (e.g. "Free" | "Plus" | "Team" | "Enterprise")
+
+model PlatformConnection {
+  id          String @id @default(cuid())
+  userAddress String
+  user        User   @relation(fields: [userAddress], references: [address], onDelete: Cascade)
+
+  platform String // "cursor" | "claude_console" | "chatgpt" | "claude"
+  status   String @default("not_connected") // ConnectionStatus enum
+
+  username String?
+
+  // Platform-specific verified data points
+  membershipType String? // cursor
+  tokenAmount    Int?    // claude_console — total tokens spent; migrate to BigInt if needed
+  planType       String? // chatgpt
+
+  primusTemplateId String?
+  attestationData  Json?   // raw Primus zkTLS attestation payload
+
+  lastVerified DateTime?
+  connectedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userAddress, platform])
+}

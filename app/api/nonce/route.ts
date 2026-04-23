@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { generateNonce } from 'siwe'
-import { nonceStore } from '@/lib/nonce-store'
+import { setAuthNonce } from '@/lib/auth-nonce'
 
 export async function GET(req: NextRequest) {
   const address = req.nextUrl.searchParams.get('address')
@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
   }
 
   const nonce = generateNonce()
-  nonceStore.set(address, nonce)
+  await setAuthNonce(address, nonce)
 
   return NextResponse.json({ nonce })
 }
