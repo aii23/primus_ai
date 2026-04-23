@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { signIn } from "next-auth/react";
-import { useRouter } from "next/navigation";
 import {
   Shield,
   Github,
@@ -42,7 +41,6 @@ export default function LoginPage() {
   const { address, isConnected } = useAccount();
   const { connectors, connect, isPending: isConnecting } = useConnect();
   const { disconnect } = useDisconnect();
-  const router = useRouter();
   const [step, setStep] = useState<SignInStep>("idle");
   const [error, setError] = useState<string | null>(null);
 
@@ -104,7 +102,7 @@ export default function LoginPage() {
         return;
       }
 
-      router.push("/dashboard");
+      window.location.href = "/dashboard";
     } catch (err: any) {
       if (err?.code === 4001) {
         setError("Signature request cancelled.");
